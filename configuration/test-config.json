@@ -1,0 +1,7 @@
+{
+  "IntTest": 1,
+  "StringTest": "pass",
+  "Nested": {
+    "TestNest" : "nested"
+  }
+}
