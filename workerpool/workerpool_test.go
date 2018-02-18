@@ -3,29 +3,46 @@ package workerpool
 import(
 	"testing"
 	//"log"
-	"sync"
 	"time"
+	"sync/atomic"
 )
 
 const cycles = 1000
 
-func TestCleaner(t *testing.T) {
-	w := NewWorkerManager(10)
-	wg := sync.WaitGroup{}
-	//done := make(chan struct{})
-	for i := 0; i <= cycles; i++ {
-		wg.Add(1)
-		taskCh := <-w.Ready
-			taskCh.TaskChanel<-func(){
-				wg.Done()
-				}
-	}
-
-	wg.Wait()
-	time.Sleep(cleanerCheckInterval)
-
-	// There should always be 1 worker in the chamber
-	if w.capacity != 9 {
-		t.Error("Wrokerpool capacity failed to grow after ")
-	}
+type TestTask struct {
+	id int
 }
+
+var processed, successful, failure  int64
+
+func (t *TestTask) Process() error {
+	atomic.AddInt64(&processed, 1)
+	return nil
+}
+
+func (t *TestTask) onSuccess() {
+	atomic.AddInt64(&successful, 1)
+}
+
+func (t *TestTask) onFailure(err error) {
+	atomic.AddInt64(&successful, 1)
+}
+
+//TODO: Add actual tests
+func TestExecutor(t *testing.T) {
+	w := NewWorkerManager(10)
+	processed = 0
+	successful = 0
+	failure = 0
+	//wg := sync.WaitGroup{}
+	for i := 0; i < cycles; i++ {
+		t := &TestTask{ id : i}
+		w.Execute(t)
+	}
+
+	//wg.Wait()
+	time.Sleep(1 * time.Second)
+	if successful + failure != processed {
+		t.Errorf("ERROR: TestExecutor : %d successful + %d failure != %d processed\n", successful, failure, processed)
+	}
+	}

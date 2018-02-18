@@ -1,125 +1,79 @@
 package workerpool
 
 import (
-	"log"
 	"sync"
-	"time"
+	"sync/atomic"
 	"github.com/rnpridgeon/utils/collections"
 )
 
-// TODO: make configurable?
-const maxIdleTime = 30 * time.Second
-const cleanerCheckInterval = maxIdleTime + 1 * time.Second
-
-func startCleaner(tickTime time.Duration, clean func(time.Time)) {
-	for _ = range time.NewTicker(tickTime).C {
-		log.Println("INFO: Reaping expired workers")
-		clean(time.Now())
-	}
+type Task interface {
+	Process() error
+	onSuccess()
+	onFailure(error)
 }
 
 type WorkerManager struct {
-	free  *collections.DEQueue
-	Ready chan *worker
-	Close chan struct{}
-	*sync.Mutex
-	capacity int
+	runnable  *collections.DEQueue
+	*sync.Cond
+	len int64
+	capacity int64
 }
 
 // Returns reference to running worker manager
-func NewWorkerManager(maxWorker int) (w *WorkerManager) {
+func NewWorkerManager(maxWorker int64) (w *WorkerManager) {
 	w = &WorkerManager{
-		free:     collections.NewDEQueue(),
-		Ready:    make(chan *worker),
-		Close:    make(chan struct{}),
-		Mutex:    &sync.Mutex{},
+		runnable:     collections.NewDEQueue(),
+		Cond:    &sync.Cond{L:&sync.Mutex{}},
+		len: 0,
 		capacity: maxWorker,
 	}
 
-	go startCleaner(cleanerCheckInterval, w.maybeClean)
 	go w.run()
 
 	return w
 }
 
-// Put first available worker on ready channel for consumption
+
 func (w *WorkerManager) run() {
-
 	for {
-		if w.free.GetDepth() == 0 {
-			maybeAdd(w)
+		t := w.runnable.WatchQueue().(Task)
+
+		w.L.Lock()
+		if atomic.LoadInt64(&w.len) > w.capacity {
+			w.Cond.Wait()
 		}
-		w.Ready <- w.free.Watch().(*worker)
+		w.L.Unlock()
+		w.decrement()
+
+		go func(t Task){
+			if err := t.Process(); err  == nil {
+				t.onSuccess()
+			} else {
+				t.onFailure(err)
+			}
+			w.increment()
+		}(t)
+
 	}
 }
 
-// Add worker to pool assuming capacity has not yet been met
-func maybeAdd(w *WorkerManager) {
-	w.Lock()
-	if w.capacity > 0 {
-		w.free.Push(newWorker(w.free))
-		log.Printf("INFO: Adding worker %d to the pool", w.capacity)
-		w.capacity--
-	}
-	w.Unlock()
+// Executes task if we aren't at capacity, otherwise dumps on the runnable queue
+func (w *WorkerManager) Execute(t Task) {
+	w.runnable.Enqueue(t)
 }
 
-// shrink worker pool if workers are sitting around for more than max idle
-func (w *WorkerManager) maybeClean(deadline time.Time) {
-	for idle := w.free.PopBack(); idle != nil; idle = w.free.PopBack() {
-		idle := idle.(*worker)
-		if idle.expiry.Before(deadline) {
-			log.Printf("INFO: Removing worker with expiry %v from the pool", idle.expiry)
-
-			idle.stop <- struct{}{}
-			idle = nil
-
-			w.capacity++
-			continue
-		}
-		w.free.Push(idle)
-		// no need to continue, oldest eligible worker was current
-		break;
-	}
+func (w *WorkerManager) SetCapacity(n int64) {
+	w.capacity = atomic.SwapInt64(&w.capacity, n)
 }
 
-// TODO: Add maybeShrink otherwise underlying array remains in tact
-//func (*workerManager) maybeShrink() (int) {
-//	w.Lock()
-//
-//	w.Unlock()
-//}
-
-type worker struct {
-	expiry     time.Time
-	TaskChanel chan func()
-	stop       chan struct{}
-	registry   *collections.DEQueue
+func (w *WorkerManager) increment() {
+	atomic.AddInt64(&w.len, - 1)
+	w.Cond.Signal()
 }
 
-func newWorker(registry *collections.DEQueue) (w *worker) {
-	w = &worker{
-		expiry:     time.Now().Add(maxIdleTime),
-		TaskChanel: make(chan func()),
-		stop:       make(chan struct{}),
-		registry:   registry,
-	}
-
-	go w.run()
-
-	return w
+func (w *WorkerManager) decrement() {
+	atomic.AddInt64(&w.len, 1)
 }
 
-func (w *worker) run() {
-	for {
-		select {
-		case work := <-w.TaskChanel:
-			work()
-			w.registry.Push(w)
-		case <-w.stop:
-			close(w.TaskChanel)
-			return
-		}
-	}
-}
+
 
