@@ -28,7 +28,7 @@ func pop(deq *DEQueue) (element interface{}) {
 	return element
 }
 
-func popBack(deq *DEQueue) (element interface{}) {
+func deque(deq *DEQueue) (element interface{}) {
 	if deq.depth > 0 {
 		element = deq.elements[0]
 		deq.elements = deq.elements[1:]
@@ -59,11 +59,17 @@ func (deq *DEQueue) Pop() (element interface{}) {
 }
 
 // Maybe I should have called it a Squeue?
-func (deq *DEQueue) PopBack() (element interface{}) {
+func (deq *DEQueue) Deque() (element interface{}) {
 	deq.locker.L.Lock()
-		element = popBack(deq)
+		element = deque(deq)
 	deq.locker.L.Unlock()
 	return element
+}
+func (deq *DEQueue) Enqueue(element interface{}) {
+	deq.locker.L.Lock()
+		push(deq, element)
+		deq.locker.Signal()
+	deq.locker.L.Unlock()
 }
 
 func (deq *DEQueue) Push(element interface{}) {
@@ -74,12 +80,24 @@ func (deq *DEQueue) Push(element interface{}) {
 }
 
 // Mimic channel behavior
-func (deq *DEQueue) Watch() (element interface{}) {
+func (deq *DEQueue) WatchQueue() (element interface{}) {
 	deq.locker.L.Lock()
 		if len(deq.elements) == 0 {
 			deq.locker.Wait()
 		}
-		element = pop(deq)
+		element = deque(deq)
+	deq.locker.L.Unlock()
+
+	return element
+}
+
+// Mimic channel behavior
+func (deq *DEQueue) WatchStack() (element interface{}) {
+	deq.locker.L.Lock()
+	if len(deq.elements) == 0 {
+		deq.locker.Wait()
+	}
+	element = pop(deq)
 	deq.locker.L.Unlock()
 
 	return element

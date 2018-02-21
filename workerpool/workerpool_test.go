@@ -2,7 +2,6 @@ package workerpool
 
 import(
 	"testing"
-	//"log"
 	"time"
 	"sync/atomic"
 )
@@ -15,9 +14,8 @@ type TestTask struct {
 
 var processed, successful, failure  int64
 
-func (t *TestTask) Process() error {
+func (t *TestTask) Process() {
 	atomic.AddInt64(&processed, 1)
-	return nil
 }
 
 func (t *TestTask) onSuccess() {
@@ -37,7 +35,8 @@ func TestExecutor(t *testing.T) {
 	//wg := sync.WaitGroup{}
 	for i := 0; i < cycles; i++ {
 		t := &TestTask{ id : i}
-		w.Execute(t)
+		w.Execute(t.Process)
+		w.Execute(t.onSuccess)
 	}
 
 	//wg.Wait()
