@@ -44,4 +44,4 @@ func TestExecutor(t *testing.T) {
 	if successful + failure != processed {
 		t.Errorf("ERROR: TestExecutor : %d successful + %d failure != %d processed\n", successful, failure, processed)
 	}
-	}
+}
